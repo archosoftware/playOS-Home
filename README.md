@@ -1,4 +1,4 @@
-# PlayOS Launcher (PS-Style | Legacy)
+# PlayOS Home Launcher
 
-Console-like, and lightweight Android TV Launcher inspired by PS5.
+Lightweight, fast, stable Android/GoogleTV Launcher built with native stacks.
 
