@@ -1,4 +1,4 @@
-package com.archosoftware.playos.ui
+package com.archosoftware.home.playos.ui
 
 import android.text.format.DateFormat
 import androidx.compose.animation.Crossfade
@@ -60,8 +60,8 @@ import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Icon
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
-import com.archosoftware.playos.data.AppEntry
-import com.archosoftware.playos.data.AppRepository
+import com.archosoftware.home.playos.data.AppEntry
+import com.archosoftware.home.playos.data.AppRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext

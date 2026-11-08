@@ -1,4 +1,4 @@
-package com.archosoftware.playos.ui.theme
+package com.archosoftware.home.playos.ui.theme
 
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily

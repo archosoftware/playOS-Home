@@ -4,17 +4,17 @@ plugins {
 }
 
 android {
-    namespace = "com.archosoftware.playos"
+    namespace = "com.archosoftware.home.playos"
     compileSdk {
         version = release(37)
     }
 
     defaultConfig {
-        applicationId = "com.archosoftware.playos"
+        applicationId = "com.archosoftware.home.playos"
         minSdk = 28
         targetSdk = 37
         versionCode = 1
-        versionName = "1.0"
+        versionName = "26.11.0"
 
     }
 

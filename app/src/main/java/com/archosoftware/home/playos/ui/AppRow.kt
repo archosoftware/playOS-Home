@@ -1,4 +1,4 @@
-package com.archosoftware.playos.ui
+package com.archosoftware.home.playos.ui
 
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Animatable
@@ -65,9 +65,9 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
-import com.archosoftware.playos.data.AppEntry
-import com.archosoftware.playos.data.AppIcon
-import com.archosoftware.playos.data.AppRepository
+import com.archosoftware.home.playos.data.AppEntry
+import com.archosoftware.home.playos.data.AppIcon
+import com.archosoftware.home.playos.data.AppRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay

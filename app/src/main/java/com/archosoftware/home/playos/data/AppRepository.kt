@@ -1,4 +1,4 @@
-package com.archosoftware.playos.data
+package com.archosoftware.home.playos.data
 
 import android.app.ActivityManager
 import android.content.Context

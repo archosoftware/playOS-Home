@@ -1,4 +1,4 @@
-package com.archosoftware.playos
+package com.archosoftware.home.playos
 
 import android.content.ActivityNotFoundException
 import android.content.Intent
@@ -32,10 +32,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
-import com.archosoftware.playos.data.AppEntry
-import com.archosoftware.playos.data.AppRepository
-import com.archosoftware.playos.ui.HomeScreen
-import com.archosoftware.playos.ui.theme.PlayOSTheme
+import com.archosoftware.home.playos.data.AppEntry
+import com.archosoftware.home.playos.data.AppRepository
+import com.archosoftware.home.playos.ui.HomeScreen
+import com.archosoftware.home.playos.ui.theme.PlayOSTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch

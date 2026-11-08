@@ -1,4 +1,4 @@
-package com.archosoftware.playos.ui
+package com.archosoftware.home.playos.ui
 
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
