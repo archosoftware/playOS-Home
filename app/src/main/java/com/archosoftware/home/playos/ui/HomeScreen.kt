@@ -20,6 +20,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalContext
 import com.archosoftware.home.playos.data.AppEntry
 import com.archosoftware.home.playos.data.AppRepository
+import com.archosoftware.home.playos.data.TvWatchNextRepository
 
 private enum class Page { Home, AllApps, Details }
 
@@ -31,6 +32,7 @@ fun HomeScreen(
     favorites: Set<String>,
     hiddenApps: Set<String>,
     repository: AppRepository,
+    watchNextRepository: TvWatchNextRepository? = null,
     onLaunch: (AppEntry) -> Unit,
     onAppInfo: (AppEntry) -> Unit,
     onOpenSettings: () -> Unit,
@@ -39,6 +41,7 @@ fun HomeScreen(
     onForceStop: (AppEntry) -> Unit,
 ) {
     val context = LocalContext.current
+    val watchNext = watchNextRepository ?: remember(context) { TvWatchNextRepository(context) }
     val selfPackage = context.packageName
 
     var page by remember { mutableStateOf(Page.Home) }
@@ -185,6 +188,7 @@ fun HomeScreen(
                 Page.Home -> HomeContent(
                     pinned = pinned,
                     repository = repository,
+                    watchNextRepository = watchNext,
                     selectedIndex = homeIndex,
                     isMoving = isMoving,
                     hasHiddenApps = hiddenApps.isNotEmpty(),

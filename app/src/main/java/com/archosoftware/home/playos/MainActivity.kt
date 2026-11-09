@@ -2,6 +2,7 @@ package com.archosoftware.home.playos
 
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
@@ -9,6 +10,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.addCallback
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -34,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import com.archosoftware.home.playos.data.AppEntry
 import com.archosoftware.home.playos.data.AppRepository
+import com.archosoftware.home.playos.data.TvWatchNextRepository
 import com.archosoftware.home.playos.ui.HomeScreen
 import com.archosoftware.home.playos.ui.theme.PlayOSTheme
 import kotlinx.coroutines.Dispatchers
@@ -45,11 +48,20 @@ import kotlin.time.Duration.Companion.milliseconds
 class MainActivity : ComponentActivity() {
 
     private lateinit var repository: AppRepository
+    private lateinit var watchNextRepository: TvWatchNextRepository
 
     private var apps by mutableStateOf<List<AppEntry>>(emptyList())
     private var favorites by mutableStateOf<Set<String>>(emptySet())
     private var hiddenApps by mutableStateOf<Set<String>>(emptySet())
     private var appsLoaded by mutableStateOf(value = false)
+
+    private val requestTvPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted && ::watchNextRepository.isInitialized) {
+            watchNextRepository.refresh()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -57,8 +69,14 @@ class MainActivity : ComponentActivity() {
         window.decorView.isSoundEffectsEnabled = true
 
         repository = AppRepository(applicationContext)
+        watchNextRepository = TvWatchNextRepository(applicationContext)
         favorites = repository.loadFavorites()
         hiddenApps = repository.loadHiddenApps()
+
+        val tvPermission = "android.permission.READ_TV_LISTINGS"
+        if (checkSelfPermission(tvPermission) != PackageManager.PERMISSION_GRANTED) {
+            requestTvPermission.launch(tvPermission)
+        }
 
         onBackPressedDispatcher.addCallback(
             owner = this,
@@ -84,6 +102,7 @@ class MainActivity : ComponentActivity() {
                         favorites = favorites,
                         hiddenApps = hiddenApps,
                         repository = repository,
+                        watchNextRepository = watchNextRepository,
                         onLaunch = ::launchApp,
                         onAppInfo = ::openAppInfo,
                         onOpenSettings = ::openSettings,
@@ -117,6 +136,14 @@ class MainActivity : ComponentActivity() {
                 repository.loadApps()
             }
             appsLoaded = true
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+
+        if (::watchNextRepository.isInitialized) {
+            watchNextRepository.refresh()
         }
     }
 

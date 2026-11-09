@@ -13,6 +13,10 @@
 
     <!-- Query network connectivity for the quick settings panel -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Read Watch Next programs published by streaming and media apps -->
+    <uses-permission android:name="android.permission.READ_TV_LISTINGS" />
 
     <!-- Android 11+ package visibility: query installed TV and mobile applications -->
     <queries>

@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -45,7 +46,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableIntState
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -93,6 +96,8 @@ import com.archosoftware.home.playos.R
 import com.archosoftware.home.playos.data.AppEntry
 import com.archosoftware.home.playos.data.AppIcon
 import com.archosoftware.home.playos.data.AppRepository
+import com.archosoftware.home.playos.data.TvWatchNextRepository
+import com.archosoftware.home.playos.data.WatchNextItem
 import com.archosoftware.home.playos.data.openSystemScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -124,6 +129,7 @@ private sealed interface TileArt {
 internal fun HomeContent(
     pinned: List<AppEntry>,
     repository: AppRepository,
+    watchNextRepository: TvWatchNextRepository,
     selectedIndex: MutableIntState,
     isMoving: Boolean,
     hasHiddenApps: Boolean,
@@ -142,6 +148,9 @@ internal fun HomeContent(
     onOpenQuick: () -> Unit,
 ) {
     val homePill = remember { FocusRequester() }
+    val continueWatching by watchNextRepository.items.collectAsState()
+    val cwRequester = remember { FocusRequester() }
+    val cwIndex = remember { mutableIntStateOf(0) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         SceneBackground()
@@ -178,6 +187,7 @@ internal fun HomeContent(
                 repository = repository,
                 selectedIndex = selectedIndex,
                 isMoving = isMoving,
+                canGoDown = continueWatching.isNotEmpty(),
                 rowRequester = rowRequester,
                 onLaunch = onLaunch,
                 onLongPress = onLongPress,
@@ -186,31 +196,60 @@ internal fun HomeContent(
                 onFinishMove = onFinishMove,
                 onCancelMove = onCancelMove,
                 modifier = Modifier
-                    .focusProperties { up = homePill },
+                    .focusProperties {
+                        up = homePill
+                        down = if (continueWatching.isNotEmpty()) cwRequester else FocusRequester.Default
+                    },
             )
 
-            Box(
-                modifier = Modifier
-                    .height(28.dp)
-                    .padding(start = ScreenPadding),
-            ) {
-                when {
-                    isMoving -> Text(
-                        text = "Left / Right to move  •  OK to place  •  Back to cancel",
-                        color = PlayColors.Favorite,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
+            if (isMoving || pinned.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .height(28.dp)
+                        .padding(start = ScreenPadding),
+                ) {
+                    when {
+                        isMoving -> Text(
+                            text = "Left / Right to move  •  OK to place  •  Back to cancel",
+                            color = PlayColors.Favorite,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
 
-                    pinned.isEmpty() -> Text(
-                        text = "Nothing pinned yet. Open All apps, hold OK on an app and choose Pin to home.",
-                        color = PlayColors.TextDim,
-                        fontSize = 14.sp,
-                    )
+                        pinned.isEmpty() -> Text(
+                            text = "Nothing pinned yet. Open All apps, hold OK on an app and choose Pin to home.",
+                            color = PlayColors.TextDim,
+                            fontSize = 14.sp,
+                        )
+                    }
                 }
+            } else {
+                Spacer(Modifier.height(8.dp))
             }
 
-            Spacer(Modifier.weight(0.6f))
+            if (continueWatching.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+
+                Text(
+                    text = "Continue watching",
+                    color = Color.White,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(start = ScreenPadding),
+                )
+
+                ContinueWatchingRow(
+                    items = continueWatching,
+                    repository = watchNextRepository,
+                    selectedIndex = cwIndex,
+                    cwRequester = cwRequester,
+                    onLaunch = { item -> watchNextRepository.launch(item) },
+                    modifier = Modifier
+                        .focusProperties { up = rowRequester },
+                )
+            }
+
+            Spacer(Modifier.weight(0.5f))
         }
     }
 }
@@ -540,6 +579,7 @@ private fun ShortcutRow(
     repository: AppRepository,
     selectedIndex: MutableIntState,
     isMoving: Boolean,
+    canGoDown: Boolean,
     rowRequester: FocusRequester,
     onLaunch: (AppEntry) -> Unit,
     onLongPress: (AppEntry) -> Unit,
@@ -645,7 +685,16 @@ private fun ShortcutRow(
                         }
                     }
 
-                    Key.DirectionDown -> true
+                    Key.DirectionDown -> {
+                        if (isMoving || !canGoDown) {
+                            true
+                        } else {
+                            if (down) {
+                                sounds.playNavDown()
+                            }
+                            false
+                        }
+                    }
 
                     Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
                         if (isMoving) {
@@ -845,3 +894,217 @@ private fun AllAppsTile(selected: Boolean) {
         }
     }
 }
+
+// Continue watching row
+@Composable
+private fun ContinueWatchingRow(
+    items: List<WatchNextItem>,
+    repository: TvWatchNextRepository,
+    selectedIndex: MutableIntState,
+    cwRequester: FocusRequester,
+    onLaunch: (WatchNextItem) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val sounds = LocalTvSounds.current
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = (selectedIndex.intValue - 1).coerceAtLeast(0),
+    )
+    var rowFocused by remember { mutableStateOf(false) }
+
+    LaunchedEffect(listState) {
+        snapshotFlow { selectedIndex.intValue }.collectLatest { selected ->
+            val info = listState.layoutInfo
+            val item = info.visibleItemsInfo.firstOrNull { it.index == selected }
+            if (item == null) {
+                listState.animateScrollToItem(selected)
+            } else {
+                val start = info.viewportStartOffset + info.beforeContentPadding
+                val end = info.viewportEndOffset - info.afterContentPadding
+                val itemEnd = item.offset + item.size
+                when {
+                    itemEnd > end -> listState.animateScrollBy((itemEnd - end).toFloat(), tween(200))
+                    item.offset < start -> listState.animateScrollBy((item.offset - start).toFloat(), tween(200))
+                }
+            }
+        }
+    }
+
+    LazyRow(
+        state = listState,
+        modifier = modifier
+            .fillMaxWidth()
+            .height(176.dp)
+            .focusRequester(cwRequester)
+            .onFocusChanged { rowFocused = it.isFocused }
+            .onKeyEvent { event ->
+                val selected = selectedIndex.intValue
+                val down = event.type == KeyEventType.KeyDown
+                val up = event.type == KeyEventType.KeyUp
+
+                when (event.key) {
+                    Key.DirectionLeft -> {
+                        if (down && selected > 0) {
+                            sounds.playNavLeft()
+                            selectedIndex.intValue = selected - 1
+                        }
+                        true
+                    }
+
+                    Key.DirectionRight -> {
+                        if (down && selected < items.lastIndex) {
+                            sounds.playNavRight()
+                            selectedIndex.intValue = selected + 1
+                        }
+                        true
+                    }
+
+                    Key.DirectionUp -> {
+                        if (down) {
+                            sounds.playNavUp()
+                        }
+                        false
+                    }
+
+                    Key.DirectionDown -> true
+
+                    Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                        if (up) {
+                            sounds.playClick()
+                            items.getOrNull(selected)?.let(onLaunch)
+                        }
+                        true
+                    }
+
+                    else -> false
+                }
+            }
+            .focusable(),
+        contentPadding = PaddingValues(horizontal = ScreenPadding, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        userScrollEnabled = false,
+    ) {
+        itemsIndexed(items, key = { _, item -> item.id }) { index, item ->
+            ContinueWatchingCard(
+                item = item,
+                repository = repository,
+                selected = rowFocused && (selectedIndex.intValue == index),
+            )
+        }
+    }
+}
+
+// TV program card with thumbnail poster, progress and playback details
+@Composable
+private fun ContinueWatchingCard(
+    item: WatchNextItem,
+    repository: TvWatchNextRepository,
+    selected: Boolean,
+) {
+    val focus by animateFloatAsState(
+        targetValue = if (selected) 1f else 0f,
+        animationSpec = tween(140),
+        label = "cwFocus",
+    )
+
+    val thumbnailBitmap by produceState<ImageBitmap?>(
+        initialValue = null,
+        item.id,
+        item.thumbnailUri,
+        item.posterArtUri,
+    ) {
+        value = repository.loadImage(item)
+    }
+
+    val gradientColors = remember(item.fallbackGradient) {
+        item.fallbackGradient?.map { Color(it) }
+            ?: listOf(Color(0xFF1B2333), Color(0xFF090D14))
+    }
+
+    Box(
+        modifier = Modifier
+            .size(width = 256.dp, height = 144.dp)
+            .graphicsLayer {
+                val scale = 1f + (0.06f * focus)
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(RoundedCornerShape(14.dp))
+            .background(Brush.linearGradient(gradientColors))
+            .drawWithContent {
+                drawContent()
+                if (focus > 0.01f) {
+                    drawRing(Color.White.copy(alpha = focus), 3.dp.toPx(), 14.dp.toPx())
+                }
+            },
+    ) {
+        if (thumbnailBitmap != null) {
+            Image(
+                bitmap = thumbnailBitmap!!,
+                contentDescription = item.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+
+        // Gradient overlay for contrast
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        0.45f to Color(0x66000000),
+                        1f to Color(0xEE04060C),
+                    ),
+                ),
+        )
+
+        // Metadata and progress
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+        ) {
+            Text(
+                text = item.title,
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+
+            if (item.subtitle.isNotEmpty()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = item.subtitle,
+                    color = Color.White.copy(alpha = 0.72f),
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            if (item.progress > 0f) {
+                Spacer(Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Color.White.copy(alpha = 0.24f)),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(fraction = item.progress.coerceIn(0f, 1f))
+                            .fillMaxHeight()
+                            .background(Color.White),
+                    )
+                }
+            }
+        }
+    }
+}
+
