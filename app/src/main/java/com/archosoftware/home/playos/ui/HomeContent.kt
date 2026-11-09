@@ -3,6 +3,7 @@
 package com.archosoftware.home.playos.ui
 
 import android.content.Context
+import android.graphics.BlurMaskFilter
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -60,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -73,7 +75,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -81,11 +85,13 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.tv.material3.Border
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
@@ -295,7 +301,7 @@ private fun TopBar(
             modifier = Modifier
                 .height(20.dp)
                 .alpha(0.5f),
-            contentScale = ContentScale.Fit
+            contentScale = ContentScale.Fit,
         )
         Spacer(Modifier.width(36.dp))
 
@@ -766,11 +772,17 @@ private fun ShortcutRow(
     }
 }
 
+private val cardShadowPaint = android.graphics.Paint().apply {
+    isAntiAlias = true
+    style = android.graphics.Paint.Style.FILL
+}
+
 @Composable
 private fun TileFrame(
     selected: Boolean,
     moving: Boolean,
     background: Color,
+    glowColor: Color = Color.Transparent,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val focus by animateFloatAsState(
@@ -779,13 +791,61 @@ private fun TileFrame(
         label = "tileFocus",
     )
 
+    val density = LocalDensity.current
+    val baseBlur = remember(density) {
+        BlurMaskFilter(density.run { 7.dp.toPx() }, BlurMaskFilter.Blur.NORMAL)
+    }
+    val glowBlur = remember(density) {
+        BlurMaskFilter(density.run { 10.dp.toPx() }, BlurMaskFilter.Blur.NORMAL)
+    }
+
     Box(
         modifier = Modifier
+            .zIndex(if (selected) 1f else 0f)
             .size(width = ShortcutW, height = ShortcutH)
             .graphicsLayer {
                 val scale = 1f + (0.12f * focus)
                 scaleX = scale
                 scaleY = scale
+            }
+            .drawBehind {
+                val cornerRadiusPx = 14.dp.toPx()
+                val offsetY = 3.dp.toPx()
+
+                drawIntoCanvas { canvas ->
+                    cardShadowPaint.color = android.graphics.Color.argb(90, 0, 0, 0)
+                    cardShadowPaint.maskFilter = baseBlur
+                    canvas.nativeCanvas.drawRoundRect(
+                        0f,
+                        offsetY,
+                        size.width,
+                        size.height + offsetY,
+                        cornerRadiusPx,
+                        cornerRadiusPx,
+                        cardShadowPaint,
+                    )
+
+                    if ((focus > 0.01f) && (glowColor != Color.Transparent)) {
+                        val spread = 2.dp.toPx()
+                        val glowAlpha = (glowColor.alpha * 0.65f * focus * 255).toInt().coerceIn(0, 255)
+                        cardShadowPaint.color = android.graphics.Color.argb(
+                            glowAlpha,
+                            (glowColor.red * 255).toInt(),
+                            (glowColor.green * 255).toInt(),
+                            (glowColor.blue * 255).toInt(),
+                        )
+                        cardShadowPaint.maskFilter = glowBlur
+                        canvas.nativeCanvas.drawRoundRect(
+                            -spread,
+                            -spread + offsetY + 1.dp.toPx(),
+                            size.width + spread,
+                            size.height + spread + offsetY + 1.dp.toPx(),
+                            cornerRadiusPx + spread,
+                            cornerRadiusPx + spread,
+                            cardShadowPaint,
+                        )
+                    }
+                }
             }
             .clip(ShortcutShape)
             .background(background)
@@ -825,7 +885,16 @@ private fun ShortcutTile(
         }
     }
 
-    TileFrame(selected = selected, moving = moving, background = PlayColors.Tile) {
+    val glowColor by produceState(initialValue = PlayColors.Tile, app.packageName) {
+        value = withContext(Dispatchers.Default) { repository.accent(app.packageName) }
+    }
+
+    TileFrame(
+        selected = selected,
+        moving = moving,
+        background = PlayColors.Tile,
+        glowColor = glowColor,
+    ) {
         when (val current = art) {
             is TileArt.Banner -> Image(
                 bitmap = current.bitmap,
@@ -872,6 +941,7 @@ private fun AllAppsTile(selected: Boolean) {
         selected = selected,
         moving = false,
         background = Color.White.copy(alpha = 0.10f),
+        glowColor = Color.White.copy(alpha = 0.45f),
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -909,7 +979,7 @@ private fun ContinueWatchingRow(
     val listState = rememberLazyListState(
         initialFirstVisibleItemIndex = (selectedIndex.intValue - 1).coerceAtLeast(0),
     )
-    var rowFocused by remember { mutableStateOf(false) }
+    var rowFocused by remember { mutableStateOf(value = false) }
 
     LaunchedEffect(listState) {
         snapshotFlow { selectedIndex.intValue }.collectLatest { selected ->
@@ -933,7 +1003,7 @@ private fun ContinueWatchingRow(
         state = listState,
         modifier = modifier
             .fillMaxWidth()
-            .height(176.dp)
+            .height(188.dp)
             .focusRequester(cwRequester)
             .onFocusChanged { rowFocused = it.isFocused }
             .onKeyEvent { event ->
@@ -943,7 +1013,7 @@ private fun ContinueWatchingRow(
 
                 when (event.key) {
                     Key.DirectionLeft -> {
-                        if (down && selected > 0) {
+                        if (down && (selected > 0)) {
                             sounds.playNavLeft()
                             selectedIndex.intValue = selected - 1
                         }
@@ -951,7 +1021,7 @@ private fun ContinueWatchingRow(
                     }
 
                     Key.DirectionRight -> {
-                        if (down && selected < items.lastIndex) {
+                        if (down && (selected < items.lastIndex)) {
                             sounds.playNavRight()
                             selectedIndex.intValue = selected + 1
                         }
@@ -979,12 +1049,12 @@ private fun ContinueWatchingRow(
                 }
             }
             .focusable(),
-        contentPadding = PaddingValues(horizontal = ScreenPadding, vertical = 12.dp),
+        contentPadding = PaddingValues(horizontal = ScreenPadding, vertical = 18.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalAlignment = Alignment.CenterVertically,
         userScrollEnabled = false,
     ) {
-        itemsIndexed(items, key = { _, item -> item.id }) { index, item ->
+        itemsIndexed(items, key = { _, (id) -> id }) { index, item ->
             ContinueWatchingCard(
                 item = item,
                 repository = repository,
@@ -1016,18 +1086,76 @@ private fun ContinueWatchingCard(
         value = repository.loadImage(item)
     }
 
+    val glowColor by produceState(
+        initialValue = Color(0xFF26335F),
+        item.id,
+        thumbnailBitmap,
+    ) {
+        value = withContext(Dispatchers.Default) {
+            repository.extractAccent(item, thumbnailBitmap)
+        }
+    }
+
     val gradientColors = remember(item.fallbackGradient) {
         item.fallbackGradient?.map { Color(it) }
             ?: listOf(Color(0xFF1B2333), Color(0xFF090D14))
     }
 
+    val density = LocalDensity.current
+    val baseBlur = remember(density) {
+        BlurMaskFilter(density.run { 8.dp.toPx() }, BlurMaskFilter.Blur.NORMAL)
+    }
+    val glowBlur = remember(density) {
+        BlurMaskFilter(density.run { 12.dp.toPx() }, BlurMaskFilter.Blur.NORMAL)
+    }
+
     Box(
         modifier = Modifier
+            .zIndex(if (selected) 1f else 0f)
             .size(width = 256.dp, height = 144.dp)
             .graphicsLayer {
                 val scale = 1f + (0.06f * focus)
                 scaleX = scale
                 scaleY = scale
+            }
+            .drawBehind {
+                val cornerRadiusPx = 14.dp.toPx()
+                val offsetY = 3.dp.toPx()
+
+                drawIntoCanvas { canvas ->
+                    cardShadowPaint.color = android.graphics.Color.argb(100, 0, 0, 0)
+                    cardShadowPaint.maskFilter = baseBlur
+                    canvas.nativeCanvas.drawRoundRect(
+                        0f,
+                        offsetY,
+                        size.width,
+                        size.height + offsetY,
+                        cornerRadiusPx,
+                        cornerRadiusPx,
+                        cardShadowPaint,
+                    )
+
+                    if (focus > 0.01f) {
+                        val spread = 2.dp.toPx()
+                        val glowAlpha = (glowColor.alpha * 0.70f * focus * 255).toInt().coerceIn(0, 255)
+                        cardShadowPaint.color = android.graphics.Color.argb(
+                            glowAlpha,
+                            (glowColor.red * 255).toInt(),
+                            (glowColor.green * 255).toInt(),
+                            (glowColor.blue * 255).toInt(),
+                        )
+                        cardShadowPaint.maskFilter = glowBlur
+                        canvas.nativeCanvas.drawRoundRect(
+                            -spread,
+                            -spread + offsetY + 1.dp.toPx(),
+                            size.width + spread,
+                            size.height + spread + offsetY + 1.dp.toPx(),
+                            cornerRadiusPx + spread,
+                            cornerRadiusPx + spread,
+                            cardShadowPaint,
+                        )
+                    }
+                }
             }
             .clip(RoundedCornerShape(14.dp))
             .background(Brush.linearGradient(gradientColors))

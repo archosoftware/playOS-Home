@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.content.edit
+import androidx.core.graphics.ColorUtils
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.drawable.toBitmap
 import androidx.core.graphics.get
@@ -115,35 +116,54 @@ class AppRepository(private val context: Context) {
         )
     }.getOrNull()
 
-    // Dominant accent color for background tinting
+    // Dominant accent color for background tinting and focus glow
     fun accent(packageName: String): Color {
         accentCache[packageName]?.let { return it }
-        val source = icon(packageName)?.bitmap?.asAndroidBitmap() ?: return DefaultAccent
+        val source = banner(packageName)?.asAndroidBitmap()
+            ?: icon(packageName)?.bitmap?.asAndroidBitmap()
+            ?: return DefaultAccent
 
-        val small = source.scale(8, 8, filter = true)
+        val small = source.scale(16, 16, filter = true)
         var r = 0L
         var g = 0L
         var b = 0L
-        var n = 0
-        for (y in 0 until 8) {
-            for (x in 0 until 8) {
+        var totalWeight = 0L
+        for (y in 0 until small.height) {
+            for (x in 0 until small.width) {
                 val p = small[x, y]
                 if ((p ushr 24) < 128) continue
                 val pr = (p shr 16) and 0xFF
                 val pg = (p shr 8) and 0xFF
                 val pb = p and 0xFF
                 val lum = (pr + pg + pb) / 3
-                if (lum !in (24..235)) continue
-                r += pr
-                g += pg
-                b += pb
-                n++
+                if (lum !in (20..245)) continue
+                val maxC = maxOf(pr, maxOf(pg, pb))
+                val minC = minOf(pr, minOf(pg, pb))
+                val sat = maxC - minC
+                val weight = ((sat * 2) + 10).toLong()
+                r += pr * weight
+                g += pg * weight
+                b += pb * weight
+                totalWeight += weight
             }
         }
         if (small !== source) small.recycle()
 
-        val result = if (n == 0) DefaultAccent
-        else Color((r / n).toInt(), (g / n).toInt(), (b / n).toInt())
+        val raw = if (totalWeight == 0L) {
+            DefaultAccent
+        } else {
+            Color((r / totalWeight).toInt(), (g / totalWeight).toInt(), (b / totalWeight).toInt())
+        }
+
+        val hsl = FloatArray(3)
+        ColorUtils.colorToHSL(
+            android.graphics.Color.rgb((raw.red * 255).toInt(), (raw.green * 255).toInt(), (raw.blue * 255).toInt()),
+            hsl,
+        )
+        if (hsl[2] < 0.35f) hsl[2] = 0.45f
+        if (hsl[1] < 0.25f && hsl[1] > 0.05f) hsl[1] = 0.35f
+        val result = Color(ColorUtils.HSLToColor(hsl))
+
         accentCache[packageName] = result
         return result
     }

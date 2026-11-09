@@ -7,9 +7,14 @@ import android.graphics.BitmapFactory
 import android.media.tv.TvContract
 import android.net.Uri
 import android.util.LruCache
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
+import androidx.core.graphics.get
+import androidx.core.graphics.scale
 import androidx.core.net.toUri
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -32,10 +37,7 @@ data class WatchNextItem(
     val durationMillis: Long = 0L,
     val progress: Float = 0f,
     val fallbackGradient: List<Long>? = null,
-) {
-    val displayImageUri: String?
-        get() = thumbnailUri ?: posterArtUri
-}
+)
 
 private const val PERMISSION_READ_TV_LISTINGS = "android.permission.READ_TV_LISTINGS"
 
@@ -43,6 +45,7 @@ private const val PERMISSION_READ_TV_LISTINGS = "android.permission.READ_TV_LIST
 class TvWatchNextRepository(private val context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val imageCache = LruCache<String, ImageBitmap>(30)
+    private val accentCache = LruCache<Long, Color>(30)
 
     private val _items = MutableStateFlow<List<WatchNextItem>>(emptyList())
     val items: StateFlow<List<WatchNextItem>> = _items.asStateFlow()
@@ -161,12 +164,54 @@ class TvWatchNextRepository(private val context: Context) {
         null
     }
 
-    suspend fun loadImage(uriString: String): ImageBitmap? = withContext(Dispatchers.IO) {
-        imageCache[uriString]?.let { return@withContext it }
-        val bitmap = fetchBitmap(uriString) ?: return@withContext null
-        val imageBitmap = bitmap.asImageBitmap()
-        imageCache.put(uriString, imageBitmap)
-        imageBitmap
+    fun extractAccent(item: WatchNextItem, bitmap: ImageBitmap?): Color {
+        accentCache[item.id]?.let { return it }
+        val source = bitmap?.asAndroidBitmap()
+            ?: return item.fallbackGradient?.firstOrNull()?.let { Color(it) } ?: Color(0xFF26335F)
+
+        val small = source.scale(16, 16, filter = true)
+        var r = 0L
+        var g = 0L
+        var b = 0L
+        var totalWeight = 0L
+        for (y in 0 until small.height) {
+            for (x in 0 until small.width) {
+                val p = small[x, y]
+                if ((p ushr 24) < 128) continue
+                val pr = (p shr 16) and 0xFF
+                val pg = (p shr 8) and 0xFF
+                val pb = p and 0xFF
+                val lum = (pr + pg + pb) / 3
+                if (lum !in (20..245)) continue
+                val maxC = maxOf(pr, maxOf(pg, pb))
+                val minC = minOf(pr, minOf(pg, pb))
+                val sat = maxC - minC
+                val weight = ((sat * 2) + 10).toLong()
+                r += pr * weight
+                g += pg * weight
+                b += pb * weight
+                totalWeight += weight
+            }
+        }
+        if (small !== source) small.recycle()
+
+        val raw = if (totalWeight == 0L) {
+            item.fallbackGradient?.firstOrNull()?.let { Color(it) } ?: Color(0xFF26335F)
+        } else {
+            Color((r / totalWeight).toInt(), (g / totalWeight).toInt(), (b / totalWeight).toInt())
+        }
+
+        val hsl = FloatArray(3)
+        ColorUtils.colorToHSL(
+            android.graphics.Color.rgb((raw.red * 255).toInt(), (raw.green * 255).toInt(), (raw.blue * 255).toInt()),
+            hsl,
+        )
+        if (hsl[2] < 0.35f) hsl[2] = 0.45f
+        if (hsl[1] < 0.25f && hsl[1] > 0.05f) hsl[1] = 0.35f
+        val result = Color(ColorUtils.HSLToColor(hsl))
+
+        accentCache.put(item.id, result)
+        return result
     }
 
     private fun fetchBitmap(uriString: String): android.graphics.Bitmap? = runCatching {
