@@ -3,6 +3,7 @@ package com.archosoftware.home.playos.data
 import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.ResolveInfo
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -20,14 +21,30 @@ import androidx.core.graphics.get
 import androidx.core.graphics.scale
 import java.util.concurrent.ConcurrentHashMap
 
+enum class AppCategory(val label: String) {
+    All("All"),
+    Video("Video"),
+    Music("Music"),
+    Games("Games"),
+    Tools("Tools"),
+}
+
 data class AppEntry(
     val label: String,
     val packageName: String,
+    val category: AppCategory = AppCategory.Tools,
 )
 
 data class AppIcon(
     val bitmap: ImageBitmap,
     val fullBleed: Boolean,
+)
+
+data class AppDetails(
+    val version: String?,
+    val description: String?,
+    val installed: Long,
+    val updated: Long,
 )
 
 class AppRepository(private val context: Context) {
@@ -39,6 +56,12 @@ class AppRepository(private val context: Context) {
     private val iconCache = object : LruCache<String, AppIcon>(5 * 1024) {
         override fun sizeOf(key: String, value: AppIcon): Int =
             (value.bitmap.width * value.bitmap.height * 4) / 1024
+    }
+
+    // Cache TV banners (320x180 px) - 8MB budget
+    private val bannerCache = object : LruCache<String, ImageBitmap>(8 * 1024) {
+        override fun sizeOf(key: String, value: ImageBitmap): Int =
+            (value.width * value.height * 4) / 1024
     }
 
     private val accentCache = ConcurrentHashMap<String, Color>()
@@ -53,7 +76,12 @@ class AppRepository(private val context: Context) {
             .asSequence()
             .distinctBy { it.activityInfo.packageName }
             .filter { !it.activityInfo.packageName.equals(selfPackage, ignoreCase = true) }
-            .map { AppEntry(it.loadLabel(pm).toString(), it.activityInfo.packageName) }
+            .map { resolveInfo ->
+                val pkg = resolveInfo.activityInfo.packageName
+                val label = resolveInfo.loadLabel(pm).toString()
+                val category = detectCategory(resolveInfo)
+                AppEntry(label, pkg, category)
+            }
             .filter { (_, packageName) -> !packageName.equals(selfPackage, ignoreCase = true) }
             .sortedBy { (label) -> label.lowercase() }
             .toList()
@@ -65,6 +93,27 @@ class AppRepository(private val context: Context) {
             .getOrNull()
             ?.also { iconCache.put(packageName, it) }
     }
+
+    fun banner(packageName: String): ImageBitmap? {
+        bannerCache[packageName]?.let { return it }
+        return runCatching {
+            val drawable = pm.getApplicationBanner(packageName)
+                ?: pm.getActivityBanner(launchIntent(packageName) ?: return null)
+            drawable?.toBitmap(BANNER_W, BANNER_H, Bitmap.Config.ARGB_8888)?.asImageBitmap()
+        }.getOrNull()?.also { bannerCache.put(packageName, it) }
+    }
+
+    fun details(packageName: String): AppDetails? = runCatching {
+        val pkgInfo = pm.getPackageInfo(packageName, 0)
+        val appInfo = pkgInfo.applicationInfo
+        val desc = runCatching { appInfo?.loadDescription(pm)?.toString() }.getOrNull()
+        AppDetails(
+            version = pkgInfo.versionName,
+            description = desc?.takeIf { it.isNotBlank() },
+            installed = pkgInfo.firstInstallTime,
+            updated = pkgInfo.lastUpdateTime,
+        )
+    }.getOrNull()
 
     // Dominant accent color for background tinting
     fun accent(packageName: String): Color {
@@ -166,8 +215,56 @@ class AppRepository(private val context: Context) {
 
     fun clearIconCache() {
         iconCache.evictAll()
+        bannerCache.evictAll()
         accentCache.clear()
     }
+
+    private fun detectCategory(resolveInfo: ResolveInfo): AppCategory {
+        val appInfo = resolveInfo.activityInfo.applicationInfo
+        val pkg = resolveInfo.activityInfo.packageName.lowercase()
+        val label = runCatching { resolveInfo.loadLabel(pm).toString().lowercase() }.getOrDefault("")
+
+        @Suppress("DEPRECATION")
+        when (appInfo.category) {
+            ApplicationInfo.CATEGORY_VIDEO -> return AppCategory.Video
+            ApplicationInfo.CATEGORY_AUDIO -> return AppCategory.Music
+            ApplicationInfo.CATEGORY_GAME -> return AppCategory.Games
+            else -> Unit
+        }
+
+        @Suppress("DEPRECATION")
+        if ((appInfo.flags and ApplicationInfo.FLAG_IS_GAME) != 0) {
+            return AppCategory.Games
+        }
+
+        return when {
+            isVideo(pkg, label) -> AppCategory.Video
+            isMusic(pkg, label) -> AppCategory.Music
+            isGame(pkg, label) -> AppCategory.Games
+            else -> AppCategory.Tools
+        }
+    }
+
+    private fun isVideo(pkg: String, label: String): Boolean =
+        pkg.contains("youtube") || pkg.contains("netflix") || pkg.contains("primevideo") ||
+            pkg.contains("disney") || pkg.contains("vlc") || pkg.contains("kodi") ||
+            pkg.contains("mxplayer") || pkg.contains("hulu") || pkg.contains("hbomax") ||
+            pkg.contains("max") || pkg.contains("plex") || pkg.contains("twitch") ||
+            pkg.contains("tv") || pkg.contains("video") || pkg.contains("cinema") ||
+            label.contains("video") || label.contains("tv") || label.contains("movie") ||
+            label.contains("player")
+
+    private fun isMusic(pkg: String, label: String): Boolean =
+        pkg.contains("spotify") || pkg.contains("music") || pkg.contains("audio") ||
+            pkg.contains("soundcloud") || pkg.contains("pandora") || pkg.contains("deezer") ||
+            pkg.contains("tidal") || pkg.contains("radio") || pkg.contains("podcast") ||
+            label.contains("music") || label.contains("audio") || label.contains("radio")
+
+    private fun isGame(pkg: String, label: String): Boolean =
+        pkg.contains("game") || pkg.contains("steam") || pkg.contains("retroarch") ||
+            pkg.contains("ppsspp") || pkg.contains("citra") || pkg.contains("moonlight") ||
+            pkg.contains("playstation") || pkg.contains("xbox") || pkg.contains("arcade") ||
+            pkg.contains("emulator") || label.contains("game")
 
     // Unmask adaptive icons so full tile area is used
     private fun render(drawable: Drawable): AppIcon {
@@ -210,6 +307,8 @@ class AppRepository(private val context: Context) {
 
     companion object {
         private const val ICON_PX = 192
+        private const val BANNER_W = 320
+        private const val BANNER_H = 180
         private const val PREFS_NAME = "playos"
         private const val KEY_FAVORITES = "favorites"
         private const val KEY_HIDDEN = "hidden_apps"

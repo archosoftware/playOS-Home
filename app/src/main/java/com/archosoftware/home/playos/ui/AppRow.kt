@@ -81,6 +81,7 @@ private const val FadedAlpha = 0.45f
 private val TileTop = 8.dp
 private const val LONG_PRESS_DURATION = 600L
 
+// app carrousel
 @Composable
 internal fun AppRow(
     apps: List<AppEntry>,
@@ -117,6 +118,7 @@ internal fun AppRow(
             }
     }
 
+    val sounds = LocalTvSounds.current
     val rowFocused = remember {
         mutableStateOf(value = false)
     }
@@ -145,7 +147,6 @@ internal fun AppRow(
                 if (!it.isFocused) {
                     longPressJob?.cancel()
                     longPressJob = null
-                    longPressFired = false
                 }
             }
             .onKeyEvent { event ->
@@ -153,6 +154,7 @@ internal fun AppRow(
                     when (event.key) {
                         Key.DirectionLeft -> {
                             if ((event.type == KeyEventType.KeyDown) && (focusedIndex.intValue > 0)) {
+                                sounds.playNavLeft()
                                 val cur = focusedIndex.intValue
                                 onMoveItem?.invoke(cur, cur - 1)
                                 focusedIndex.intValue = cur - 1
@@ -162,6 +164,7 @@ internal fun AppRow(
 
                         Key.DirectionRight -> {
                             if ((event.type == KeyEventType.KeyDown) && (focusedIndex.intValue < lastIndex)) {
+                                sounds.playNavRight()
                                 val cur = focusedIndex.intValue
                                 onMoveItem?.invoke(cur, cur + 1)
                                 focusedIndex.intValue = cur + 1
@@ -174,6 +177,7 @@ internal fun AppRow(
                         Key.NumPadEnter,
                         -> {
                             if (event.type == KeyEventType.KeyUp) {
+                                sounds.playClick()
                                 onFinishMove?.invoke()
                             }
                             true
@@ -183,6 +187,7 @@ internal fun AppRow(
                         Key.Escape,
                         -> {
                             if (event.type == KeyEventType.KeyUp) {
+                                sounds.playClick()
                                 onCancelMove?.invoke()
                             }
                             true
@@ -194,14 +199,20 @@ internal fun AppRow(
                     when (event.key) {
                         Key.DirectionLeft -> {
                             if ((event.type == KeyEventType.KeyDown) && apps.isNotEmpty()) {
-                                focusedIndex.intValue = (focusedIndex.intValue - 1).coerceAtLeast(0)
+                                if (focusedIndex.intValue > 0) {
+                                    sounds.playNavLeft()
+                                    focusedIndex.intValue--
+                                }
                             }
                             true
                         }
 
                         Key.DirectionRight -> {
                             if ((event.type == KeyEventType.KeyDown) && apps.isNotEmpty()) {
-                                focusedIndex.intValue = (focusedIndex.intValue + 1).coerceAtMost(lastIndex)
+                                if (focusedIndex.intValue < lastIndex) {
+                                    sounds.playNavRight()
+                                    focusedIndex.intValue++
+                                }
                             }
                             true
                         }
@@ -220,6 +231,7 @@ internal fun AppRow(
                                             delay(LONG_PRESS_DURATION.milliseconds)
                                             if (app != null) {
                                                 longPressFired = true
+                                                sounds.playClick()
                                                 onLongPress(app)
                                             }
                                         }
@@ -231,6 +243,7 @@ internal fun AppRow(
                                     longPressJob = null
 
                                     if (!longPressFired) {
+                                        sounds.playClick()
                                         apps.getOrNull(focusedIndex.intValue)?.let(onLaunch)
                                     }
                                     longPressFired = false

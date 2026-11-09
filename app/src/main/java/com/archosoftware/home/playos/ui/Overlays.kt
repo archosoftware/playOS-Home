@@ -38,6 +38,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
@@ -56,84 +61,7 @@ import com.archosoftware.home.playos.data.AppEntry
 import com.archosoftware.home.playos.data.AppRepository
 import kotlinx.coroutines.launch
 
-@Composable
-internal fun ActionMenu(
-    app: AppEntry,
-    isFavorite: Boolean,
-    onDismiss: () -> Unit,
-    onMove: () -> Unit,
-    onSortAZ: () -> Unit,
-    onSortZA: () -> Unit,
-    onHide: () -> Unit,
-    onToggleFavorite: () -> Unit,
-    onAppInfo: () -> Unit,
-    onLaunch: () -> Unit,
-    onForceStop: () -> Unit,
-) {
-    val first = remember { FocusRequester() }
-    val appear = remember { Animatable(0f) }
-
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        LaunchedEffect(Unit) {
-            launch { appear.animateTo(1f, tween(160)) }
-            withFrameNanos { }
-            runCatching { first.requestFocus() }
-        }
-
-        Column(
-            modifier = Modifier
-                .width(320.dp)
-                .graphicsLayer {
-                    alpha = appear.value
-                    val s = 0.94f + (0.06f * appear.value)
-                    scaleX = s
-                    scaleY = s
-                }
-                .clip(RoundedCornerShape(20.dp))
-                .background(PlayColors.Card)
-                .verticalScroll(rememberScrollState())
-                .padding(20.dp),
-        ) {
-            Text(
-                text = app.label,
-                color = Color.White,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = app.packageName,
-                color = PlayColors.TextDim,
-                fontSize = 13.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(16.dp))
-
-            MenuItem(
-                text = "Move",
-                onClick = onMove,
-                modifier = Modifier.focusRequester(first),
-            )
-            MenuItem(
-                text = if (isFavorite) "Unfavorite" else "Favorite",
-                onClick = onToggleFavorite,
-            )
-            MenuItem(text = "Sort A-Z", onClick = onSortAZ)
-            MenuItem(text = "Sort Z-A", onClick = onSortZA)
-            MenuItem(text = "Hide App", onClick = onHide)
-            MenuItem(text = "App Info", onClick = onAppInfo)
-            MenuItem(text = "Launch", onClick = onLaunch)
-            MenuItem(text = "Force Stop", onClick = onForceStop)
-        }
-    }
-}
-
+// Modal dialog listing hidden applications with unhide toggles
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 internal fun HiddenAppsDialog(
@@ -141,6 +69,7 @@ internal fun HiddenAppsDialog(
     onUnhide: (AppEntry) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val sounds = LocalTvSounds.current
     val first = remember { FocusRequester() }
     val appear = remember { Animatable(0f) }
 
@@ -214,8 +143,34 @@ internal fun HiddenAppsDialog(
                         }
 
                         Surface(
-                            onClick = { onUnhide(app) },
-                            modifier = if (index == 0) Modifier.focusRequester(first) else Modifier,
+                            onClick = {
+                                sounds.playClick()
+                                onUnhide(app)
+                            },
+                            modifier = (if (index == 0) Modifier.focusRequester(first) else Modifier)
+                                .onKeyEvent { event ->
+                                    if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                                    when (event.key) {
+                                        Key.DirectionUp -> {
+                                            if (index > 0) {
+                                                sounds.playNavUp()
+                                                false
+                                            } else {
+                                                true
+                                            }
+                                        }
+                                        Key.DirectionDown -> {
+                                            if (index < hiddenApps.lastIndex) {
+                                                sounds.playNavDown()
+                                                false
+                                            } else {
+                                                true
+                                            }
+                                        }
+                                        Key.DirectionLeft, Key.DirectionRight -> true
+                                        else -> false
+                                    }
+                                },
                             shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(8.dp)),
                             colors = ClickableSurfaceDefaults.colors(
                                 containerColor = Color.White.copy(alpha = 0.12f),
@@ -239,29 +194,7 @@ internal fun HiddenAppsDialog(
     }
 }
 
-@OptIn(ExperimentalTvMaterial3Api::class)
-@Composable
-private fun MenuItem(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Surface(
-        onClick = onClick,
-        modifier = modifier.fillMaxWidth(),
-        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(12.dp)),
-        colors = ClickableSurfaceDefaults.colors(
-            containerColor = Color.Transparent,
-            contentColor = Color.White,
-            focusedContainerColor = Color.White,
-            focusedContentColor = Color.Black,
-        ),
-        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.02f),
-    ) {
-        Text(
-            text = text,
-            fontSize = 18.sp,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
-        )
-    }
-}
-
+// Fullscreen search overlay: auto-focused query field with filtered app row
 @Composable
 internal fun SearchOverlay(
     apps: List<AppEntry>,
@@ -271,6 +204,7 @@ internal fun SearchOverlay(
     onLongPress: (AppEntry) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val sounds = LocalTvSounds.current
     var query by remember { mutableStateOf("") }
     val results = remember(apps, query) {
         val q = query.trim()
@@ -328,13 +262,20 @@ internal fun SearchOverlay(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(
                         onSearch = {
+                            sounds.playClick()
                             keyboard?.hide()
                             focusManager.moveFocus(FocusDirection.Down)
                         },
                     ),
                     modifier = Modifier
                         .fillMaxWidth(0.6f)
-                        .focusRequester(fieldRequester),
+                        .focusRequester(fieldRequester)
+                        .onKeyEvent { event ->
+                            if ((event.type == KeyEventType.KeyDown) && (event.key == Key.DirectionDown)) {
+                                sounds.playNavDown()
+                            }
+                            false
+                        },
                     decorationBox = { inner ->
                         Box(
                             modifier = Modifier

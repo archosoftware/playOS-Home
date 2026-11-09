@@ -8,11 +8,13 @@
         android:name="android.software.leanback"
         android:required="false" />
 
-    <!-- Lets the "Force Stop" menu item clear another app's background processes. -->
+    <!-- Required to terminate background processes from app details/context menu -->
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
 
-    <!-- Required on Android 11+, otherwise queryIntentActivities() returns
-         nothing for other apps and the grid stays empty. -->
+    <!-- Query network connectivity for the quick settings panel -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Android 11+ package visibility: query installed TV and mobile applications -->
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
